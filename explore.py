@@ -62,28 +62,20 @@ def get_score(clf, X, y, cv=CV, n_runs=N_SCORE_RUNS, scoring='accuracy', random_
     return all_scores.mean()
 
 
-def getDummy(df, col):
+def getDummy(df_all, df, col):
     """For column `col` in DataFrame `df`
     """
-    category_values = sorted(df[col].unique())
-    # data = [[0 for i in range(len(category_values))] for i in range(len(df))]
+    category_values = sorted(df_all[col].unique())
     data = np.zeros((len(df), len(category_values)), dtype=int)
-
-    # dic_category = dict()
-    # for i, val in enumerate(list(category_values)):
-    #     dic_category[str(val)] = i
     dic_category = {str(val): i for i, val in enumerate(category_values)}
 
-    # print dic_category
     for i in range(len(df)):
-        # data[i][dic_category[str(df[col][i])]] = 1
         a = df[col].iloc[i]
         s = str(a)
         j = dic_category[s]
         data[i, j] = 1
 
     df = df.loc[:, [c for c in df.columns if c != col]]
-    # data = np.array(data)
     for i, val in enumerate(category_values):
         df.loc[:, '%s_%s' % (col, val)] = data[:, i]
 
@@ -135,37 +127,42 @@ if False:
     assert False
 
 
-def get_data():
-    path = 'sneak/jobs_sneak.csv'
-    # path = 'small/jobs_small.csv'
-    # path = 'all/jobs_all.csv'
+def get_data(path):
+
     df = pd.read_csv(path, sep='\t',
          # encoding='cp1250'
          encoding='latin-1'
         )
+    print(df[['job_id', 'hat']].describe())
     df.set_index('job_id', inplace=True)
+    df.sort_index(inplace=True)
 
     print('get_data: path=%s' % path)
     print(df.columns)
     print('df ', df.shape)
+
+    print(df[['hat']].iloc[:20])
+    print(df.index[:20])
+    print(df[['hat']].iloc[-20:])
+    print(df.index[-20:])
+
+    # assert False
 
     print('df.index[:10]')
     print(df.index[:10])
     # print('df[job_id][:10]')
     # print(df['job_id'][:10])
     # assert False
+    return df
 
-    for col in ['salary_min', 'subclasses', 'hat']:
+
+def remove_nulls(df, columns):
+    print('remove_nulls: columns=%s' % columns)
+    for col in columns:
         x = df[col]
+        n_null = sum(x.isnull())
         df = df[x.notnull()]
-        print(col, df.shape, x.dtype)
-
-        # nans = x[x.isnull()]
-        # if len(nans):
-        #     print(col)
-        #     print(nans)
-        #     assert False
-    # assert False
+        print(col, df.shape, x.dtype, n_null)
 
     return df
 
@@ -184,41 +181,126 @@ def split_train_test(df):
     return df_train, df_test
 
 
-def getXy(df):
-
-    # x_cols = [col for col in df.columns if col != 'hat']
-    x_cols = ['salary_min', 'subclasses']
-
-    X = df_train[x_cols]
-    y = df_train['hat']
+def getXy(df, x_cols):
+    X = df[x_cols]
+    y = df['hat']
     return X, y
 
-df = get_data()
-df_train, df_test = split_train_test(df)
 
-X, y = getXy(df_train)
-X_test, _ = getXy(df_test)
+def exec_model(X, y, X_test, out_path, do_score=True):
+    print(X.describe())
+    print(y.describe())
+    y = DataFrame(y, columns=['hat'])
+    X.to_csv('%s.X_train.csv' % out_path)
+    y.to_csv('%s.y_train.csv' % out_path, index_label='job_id')
+    print(y.columns)
 
-X = getDummy(X, 'subclasses')
-X_test = getDummy(X_test, 'subclasses')
+    if do_score:
+        clf = ExtraTreesClassifier()
+        score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True)
+        print('score=%f' % score)
+
+    clf = ExtraTreesClassifier()
+    clf.fit(X, y.values.ravel())
+    y_test = clf.predict(X_test)
+    y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
+    print('X_test.index', X_test.index)
+    print('y_test.index', y_test.index)
+    # y_test.to_csv('blahty.csv', index_label='job_id')
+    y_test.to_csv('%s.y_test.csv' % out_path, index_label='job_id')
 
 
-print(X.describe())
-print(y.describe())
-y = DataFrame(y, columns=['hat'])
-X.to_csv('blahX.csv')
-y.to_csv('blahy.csv', index_label='job_id')
-print(y.columns)
-clf = ExtraTreesClassifier()
+def build_model001(df):
 
-score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True)
-print('score=%f' % score)
+    x_cols = ['salary_min', 'subclasses']
 
-clf = ExtraTreesClassifier()
-clf.fit(X, y.values.ravel())
-y_test = clf.predict(X_test)
-y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
-print('X_test.index', X_test.index)
-print('y_test.index', y_test.index)
-y_test.to_csv('blahty.csv', index_label='job_id')
+    df = remove_nulls(df, x_cols + ['hat'])
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    X_all = pd.concat([X, X_test])
+
+    X = getDummy(X_all, X, 'subclasses')
+    X_test = getDummy(X_all, X_test, 'subclasses')
+
+    return X, y, X_test
+
+
+def build_model002(df):
+
+    x_cols = ['salary_min', 'salary_max']
+
+    df = remove_nulls(df, x_cols + ['hat'])
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    # X_all = pd.concat([X, X_test])
+
+    # X = getDummy(X_all, X, 'subclasses')
+    # X_test = getDummy(X_all, X_test, 'subclasses')
+
+    return X, y, X_test
+
+
+def build_model003(df):
+
+    x_cols = ['salary_max', 'subclasses']
+
+    df = remove_nulls(df, x_cols + ['hat'])
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    X_all = pd.concat([X, X_test])
+
+    X = getDummy(X_all, X, 'subclasses')
+    X_test = getDummy(X_all, X_test, 'subclasses')
+
+    return X, y, X_test
+
+
+def combine_models():
+    path = 'all/jobs_all.csv'
+    df = get_data(path)
+    _, df = split_train_test(df)
+    y_data = np.ones((len(df), 3), dtype=int) * -1
+    y = DataFrame(y_data, columns=[1, 2, 3], index=df.index)
+    y1 = pd.read_csv('model001.y_test.csv').set_index('job_id')
+    y2 = pd.read_csv('model002.y_test.csv').set_index('job_id')
+    y3 = pd.read_csv('model003.y_test.csv').set_index('job_id')
+    for d in y, y1, y2, y3:
+        print(d.describe())
+    for d in y, y1, y2, y3:
+        print(d.shape)
+
+
+path = 'sneak/jobs_sneak.csv'
+# path = 'small/jobs_small.csv'
+path = 'all/jobs_all.csv'
+
+if True:
+    df = get_data(path)
+    X, y, X_test = build_model001(df)
+    exec_model(X, y, X_test, 'model001', do_score=False)
+
+if False:
+    df = get_data(path)
+    X, y, X_test = build_model002(df)
+    exec_model(X, y, X_test, 'model002')
+
+if False:
+    df = get_data(path)
+    X, y, X_test = build_model003(df)
+    exec_model(X, y, X_test, 'model003')
+
+if False:
+    combine_models()
 
