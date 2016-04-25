@@ -3,6 +3,7 @@
 
 """
 from __future__ import division, print_function
+import os
 import re
 import numpy as np
 import pandas as pd
@@ -68,17 +69,17 @@ def getDummy(df_all, df, col):
     """
     category_values = sorted(df_all[col].unique())
     data = np.zeros((len(df), len(category_values)), dtype=int)
-    dic_category = {str(val): i for i, val in enumerate(category_values)}
+    val_index = {str(val): i for i, val in enumerate(category_values)}
+    assert len(val_index) == len(category_values)
 
     for i in range(len(df)):
         a = df[col].iloc[i]
-        s = str(a)
-        j = dic_category[s]
+        j = val_index[str(a)]
         data[i, j] = 1
 
-    df = df.loc[:, [c for c in df.columns if c != col]]
-    for i, val in enumerate(category_values):
-        df.loc[:, '%s_%s' % (col, val)] = data[:, i]
+    # df = df.loc[:, [c for c in df.columns if c != col]]
+    for j, val in enumerate(category_values):
+        df.loc[:, '%s_%s' % (col, val)] = data[:, j]
 
     return df
 
@@ -154,6 +155,7 @@ def get_data(path):
     # print('df[job_id][:10]')
     # print(df['job_id'][:10])
     # assert False
+
     return df
 
 
@@ -169,12 +171,20 @@ def remove_nulls(df, columns):
 
 
 def split_train_test(df):
+
     labelled_rows = df['hat'].values != -1
     df_train = df.iloc[labelled_rows, :]
     df_test = df.iloc[~labelled_rows, :]
     print('df      : %s ', list(df.shape))
     print('df_train: %s %.2f' % (list(df_train.shape), len(df_train) / len(df)))
     print('df_test: %s %.2f' % (list(df_test.shape), len(df_test) / len(df)))
+
+    # train_idx = set(df_train['subclasses'])
+    # test_idx = set(df_test['subclasses'])
+    # print('train:', sorted(train_idx))
+    # print('test:', sorted(test_idx))
+    # print('intersection:', sorted(train_idx & test_idx))
+
     assert len(df_train) + len(df_test) == len(df)
     assert all(df_train['hat'] != -1)
     assert all(df_test['hat'] == -1)
@@ -193,33 +203,60 @@ def getXy(df, x_cols):
 def exec_model(X, y, X_test, out_path, do_score=True):
     print(X.describe())
     print(y.describe())
-    y = DataFrame(y, columns=['hat'])
-    X.to_csv('%s.X_train.csv' % out_path)
+    y = DataFrame(y, columns=['hat'], index=X.index)
+    X.to_csv('%s.X_train.csv' % out_path, index_label='job_id')
     y.to_csv('%s.y_train.csv' % out_path, index_label='job_id')
     print(y.columns)
 
     if do_score:
         clf = ExtraTreesClassifier()
-        score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True)
+        score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True, scoring='f1')
         print('score=%f' % score)
 
     clf = ExtraTreesClassifier()
+    # clf = RandomForestClassifier()
     clf.fit(X, y.values.ravel())
+    y_self = clf.predict(X)
+    y_self = DataFrame(y_self, columns=['hat'], index=X.index)
+    n = len(y)
+    m = sum(y['hat'])
+    s = sum(y_self['hat'])
+    assert n == len(y_self)
+
+    print('****', n, m, s, m / n, s / n)
+    print(clf)
+    for i in range(10):
+        print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
+    # assert False
+
     y_test = clf.predict(X_test)
     y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
     print('X_test.index', X_test.index)
     print('y_test.index', y_test.index)
-    # y_test.to_csv('blahty.csv', index_label='job_id')
+    n = len(y)
+    m = sum(y['hat'])
+    print('y     : n=%d,m=%d=%.2f' % (n, m, m / n))
+    n = len(y_self)
+    m = sum(y_self['hat'])
+    print('y_self: n=%d,m=%d=%.2f' % (n, m, m / n))
+    n = len(y_test)
+    m = sum(y_test['hat'])
+    print('y_test: n=%d,m=%d=%.2f' % (n, m, m / n))
+    n = len(y)
+    m = sum(y_self['hat'] == y['hat'])
+    print('accuracy: n=%d,m=%d=%.2f' % (n, m, m / n))
     y_test.to_csv('%s.y_test.csv' % out_path, index_label='job_id')
+    # for i in range(100):
+    #     print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
 
 
 def build_model001(df):
 
     x_cols = ['salary_min', 'subclasses']
 
-    df = remove_nulls(df, x_cols + ['hat'])
+    df2 = remove_nulls(df, x_cols + ['hat'])
 
-    df_train, df_test = split_train_test(df)
+    df_train, df_test = split_train_test(df2)
 
     X, y = getXy(df_train, x_cols)
     X_test, _ = getXy(df_test, x_cols)
@@ -228,6 +265,15 @@ def build_model001(df):
 
     X = getDummy(X_all, X, 'subclasses')
     X_test = getDummy(X_all, X_test, 'subclasses')
+
+    print('df', df.shape)
+    print('X_all', X_all.shape)
+    assert frozenset(df.index) == frozenset(X_all.index)
+
+    X_all = pd.concat([X, X_test])
+    print('X_all', X_all.shape)
+    assert frozenset(df.index) == frozenset(X_all.index)
+    # assert False
 
     return X, y, X_test
 
@@ -284,6 +330,7 @@ def combine_models():
     model_nums = [1, 2, 3]
     # model_nums = [2, 3]
     model_paths = ['model%03d.y_test.csv' % i for i in model_nums]
+    assert all(os.path.exists(path) for path in model_paths)
     # y1 = pd.read_csv('model001.y_test.csv').set_index('job_id')
     # y2 = pd.read_csv('model002.y_test.csv').set_index('job_id')
     # y3 = pd.read_csv('model003.y_test.csv').set_index('job_id')
@@ -313,22 +360,39 @@ def combine_models():
     def func(row):
         return all(x == -1 for x in row)
 
-    empties = y.apply(func, axis=1)
-    print('empties: %d' % len(empties))
-    print(y[empties])
+    # empties = y.apply(func, axis=1)
+    # print('empties: %d' % len(empties))
+    # print(y[empties])
+
+    def vote(row):
+        print(row)
+        for j in 1, 3, 2:
+            if row[j] != -1:
+                return row[j]
+        # assert False, row
+        return -3
+
+    print(y.iloc[:20, :])
+    y_series = y.iloc[:20, :].apply(vote, axis=1)
+    assert False
+    y_test = DataFrame(y_series, columns=['hat'], index=y.index)
+    y_test.to_csv('%s.y_test.csv' % 'model004v', index_label='job_id')
+    print(y_test.columns)
+    print(y_test.describe())
+    print(y_test.iloc[:10, :])
 
 
 
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-path = 'all/jobs_all.csv'
+# path = 'all/jobs_all.csv'
 
 if False:
     df = get_data(path)
     X, y, X_test = build_model001(df)
-    exec_model(X, y, X_test, 'model001', do_score=False)
+    exec_model(X, y, X_test, 'model001', do_score=True)
 
-if False:
+if True:
     df = get_data(path)
     X, y, X_test = build_model002(df)
     exec_model(X, y, X_test, 'model002')
@@ -338,6 +402,6 @@ if False:
     X, y, X_test = build_model003(df)
     exec_model(X, y, X_test, 'model003')
 
-if True:
+if False:
     combine_models()
 

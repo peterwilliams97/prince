@@ -284,7 +284,7 @@ def combine_models():
 
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-path = 'all/jobs_all.csv'
+# path = 'all/jobs_all.csv'
 
 if True:
     df = get_data(path)
