@@ -305,12 +305,18 @@ def combine_models():
     print('y_indexes: %s' % sorted(y_indexes)[:10])
 
     for c, d in zip(model_nums, models):
-
         d_indexes = set(d.index)
         print('c=%s, d_indexes: %s' % (c, sorted(d_indexes)[:10]))
         assert d_indexes.issubset(y_indexes), (len(d_indexes - y_indexes))
-
         y[c].loc[d.index] = d['hat']
+
+    def func(row):
+        return all(x == -1 for x in row)
+
+    empties = y.apply(func, axis=1)
+    print('empties: %d' % len(empties))
+    print(y[empties])
+
 
 
 path = 'sneak/jobs_sneak.csv'
