@@ -176,6 +176,8 @@ def split_train_test(df):
     print('df_train: %s %.2f' % (list(df_train.shape), len(df_train) / len(df)))
     print('df_test: %s %.2f' % (list(df_test.shape), len(df_test) / len(df)))
     assert len(df_train) + len(df_test) == len(df)
+    assert all(df_train['hat'] != -1)
+    assert all(df_test['hat'] == -1)
     # print(df_train.index[:10])
     # print(df_test.index[:10])
     # assert False
@@ -280,6 +282,7 @@ def model_num(path):
 def combine_models():
 
     model_nums = [1, 2, 3]
+    # model_nums = [2, 3]
     model_paths = ['model%03d.y_test.csv' % i for i in model_nums]
     # y1 = pd.read_csv('model001.y_test.csv').set_index('job_id')
     # y2 = pd.read_csv('model002.y_test.csv').set_index('job_id')
@@ -289,16 +292,24 @@ def combine_models():
 
     path = 'all/jobs_all.csv'
     df = get_data(path)
-    _, df = split_train_test(df)
-    y_data = np.ones((len(df), len(models)), dtype=int) * -1
-    y = DataFrame(y_data, columns=model_nums, index=df.index)
+    df_train, df_test = split_train_test(df)
+    y_data = np.ones((len(df_test), len(models)), dtype=int) * -1
+    y = DataFrame(y_data, columns=model_nums, index=df_test.index)
 
     for d in [y] + models:
         print(d.describe())
     for d in [y] + models:
         print(d.shape, len(y) - len(d), type(d))
 
+    y_indexes = set(y.index)
+    print('y_indexes: %s' % sorted(y_indexes)[:10])
+
     for c, d in zip(model_nums, models):
+
+        d_indexes = set(d.index)
+        print('c=%s, d_indexes: %s' % (c, sorted(d_indexes)[:10]))
+        assert d_indexes.issubset(y_indexes), (len(d_indexes - y_indexes))
+
         y[c].loc[d.index] = d['hat']
 
 
