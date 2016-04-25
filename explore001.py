@@ -12,6 +12,7 @@ from glob import glob
 from pprint import pprint
 from sklearn import cross_validation, utils
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
+from collections import defaultdict
 
 
 def null_func(*args):
@@ -316,6 +317,26 @@ def build_model003(df):
     return X, y, X_test
 
 
+def show_words(df):
+    hat_counts = {}
+    for hat in [-1, 0, 1]:
+        counts = defaultdict(int)
+        df2 = df[df['hat'] == hat]
+        for title in df2['title']:
+            title = title.lower()
+            words = title.split()
+            for w in words:
+                counts[w] += 1
+        hat_counts[hat] = counts
+
+    for hat in [-1, 0, 1]:
+        print('-' * 80)
+        print('hat=%d' % hat)
+        counts = hat_counts[hat]
+        for i, w in enumerate(sorted(counts, key=lambda k: -counts[k])[:20]):
+            print('%3d: %4d: %s' % (i, counts[w], w))
+
+
 RE_MODEL = re.compile(r'model(\d+)\.')
 
 
@@ -404,4 +425,8 @@ if False:
 
 if False:
     combine_models()
+
+if True:
+    df = get_data(path)
+    show_words(df)
 
