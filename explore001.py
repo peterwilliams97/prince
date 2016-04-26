@@ -134,7 +134,8 @@ def get_data(path):
 
     df = pd.read_csv(path, sep='\t',
          # encoding='cp1250'
-         encoding='latin-1'
+         encoding='latin-1',
+         # dtype={'title': str, 'abstract': str}
         )
     print(df[['job_id', 'hat']].describe())
     df.set_index('job_id', inplace=True)
@@ -316,25 +317,92 @@ def build_model003(df):
 
     return X, y, X_test
 
+STOP_WORDS = {
+    '-',
+    'and',
+    'for',
+    '/',
+    '|',
+    '&',
+    'of',
+    'in',
+    'a',
+    'as',
+    'i',
+    'on',
+    'the'
+}
 
-def show_words(df):
+RE_SPACE = re.compile(r'[\s\.,;:\(\)\[\]/\+&\-]+')
+
+
+def show_words_column(df, column, n_top):
+    print('=' * 80)
+    print('show_words:', df.shape, column)
     hat_counts = {}
     for hat in [-1, 0, 1]:
         counts = defaultdict(int)
         df2 = df[df['hat'] == hat]
-        for title in df2['title']:
+        for title in df2[column]:
             title = title.lower()
-            words = title.split()
-            for w in words:
-                counts[w] += 1
+            words = RE_SPACE.split(title)
+            for w in set(words):
+                if w and w not in STOP_WORDS:
+                    counts[w] += 1
         hat_counts[hat] = counts
 
-    for hat in [-1, 0, 1]:
-        print('-' * 80)
-        print('hat=%d' % hat)
-        counts = hat_counts[hat]
-        for i, w in enumerate(sorted(counts, key=lambda k: -counts[k])[:20]):
-            print('%3d: %4d: %s' % (i, counts[w], w))
+    if False:
+        for hat in [-1, 0, 1]:
+            print('-' * 80)
+            print('hat=%d' % hat)
+            counts = hat_counts[hat]
+            for i, w in enumerate(sorted(counts, key=lambda k: -counts[k])[:90]):
+                print('%3d: %4d: %s' % (i, counts[w], w))
+
+        top0 = sorted(hat_counts[0], key=lambda k: -hat_counts[0][k])
+        top1 = sorted(hat_counts[1], key=lambda k: -hat_counts[0][k])
+
+    key_words = set()
+    for hat in [0, 1]:
+        key_words |= set(hat_counts[hat].keys())
+    contrasts = {w: [0, 0] for w in key_words}
+    for i, hat in enumerate([0, 1]):
+        for w, n in hat_counts[hat].items():
+            contrasts[w][i] += n
+
+    ratios = {}
+    for w, (n0, n1) in contrasts.items():
+        ratios[w] = (n1 + 10) / (n0 + 10)
+
+    ratio_order = sorted(ratios.keys(), key=lambda k: ratios[k])
+
+    print('-' * 80)
+    for w in ratio_order[:n_top]:
+        print('%8.3f %5d %5d "%s"' % (1.0 / ratios[w], contrasts[w][0], contrasts[w][1], w))
+    print('-' * 80)
+    for w in ratio_order[-n_top:]:
+        print('%8.3f %5d %5d "%s"' % (ratios[w], contrasts[w][0], contrasts[w][1], w))
+
+
+def show_words(df, n_top):
+    # for col in df.columns:
+    #     print(col, df[col].dtype)
+    # for s in df['abstract'].iloc[:5]:
+    #     print(type(s), s)
+
+    filled = df['abstract'].fillna('')
+    df['abstract'] = filled
+    # for s in df['abstract']:
+    #     assert isinstance(s, str), (type(s), s)
+    i_abstract = list(df.columns).index('abstract')
+    for row in df.itertuples():
+        s = row[i_abstract + 1]
+        assert isinstance(s, str), (type(s), s, row)
+
+
+    # assert False
+    show_words_column(df, 'title', n_top)
+    show_words_column(df, 'abstract', n_top)
 
 
 RE_MODEL = re.compile(r'model(\d+)\.')
@@ -428,5 +496,5 @@ if False:
 
 if True:
     df = get_data(path)
-    show_words(df)
+    show_words(df, 50)
 
