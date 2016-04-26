@@ -241,8 +241,8 @@ def exec_model(X, y, X_test, out_path, do_score=True):
 
     y_test = clf.predict(X_test)
     y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
-    print('X_test.index', X_test.index)
-    print('y_test.index', y_test.index)
+    # print('X_test.index', X_test.index)
+    # print('y_test.index', y_test.index)
     n = len(y)
     m = sum(y['hat'])
     print('y     : n=%d,m=%d=%.2f' % (n, m, m / n))
@@ -258,6 +258,9 @@ def exec_model(X, y, X_test, out_path, do_score=True):
     y_test.to_csv('%s.y_test.csv' % out_path, index_label='job_id')
     # for i in range(100):
     #     print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
+
+    pickle.dump('%s.pkl' % out_path, clf)
+    print(clf.feature_importances_')
 
 
 def build_model001(df):
@@ -377,11 +380,11 @@ def build_model004(df):
     X_test = add_keywords(X_test, 'title', keywords['title'])
     X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
 
-    for col in X.columns:
-        print(col, X[col].dtype)
-    for col in X_test.columns:
-        print(col, X_test[col].dtype)
-    # assert False
+    # for col in X.columns:
+    #     print(col, X[col].dtype)
+    # for col in X_test.columns:
+    #     print(col, X_test[col].dtype)
+    # # assert False
 
     return X, y, X_test
 
@@ -560,7 +563,7 @@ def combine_models():
 
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-path = 'all/jobs_all.csv'
+# path = 'all/jobs_all.csv'
 
 if False:
     df = get_data(path)
@@ -587,7 +590,7 @@ if False:
 if True:
     df = get_data(path)
     X, y, X_test = build_model004(df)
-    print('X', type(X))
-    print('y', type(y))
-    print('X_test', type(X_test))
+    # print('X', type(X))
+    # print('y', type(y))
+    # print('X_test', type(X_test))
     exec_model(X, y, X_test, 'model004')
