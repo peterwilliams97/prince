@@ -7,12 +7,13 @@ import os
 import re
 import numpy as np
 import pandas as pd
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from glob import glob
 from pprint import pprint
 from sklearn import cross_validation, utils
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from collections import defaultdict
+import pickle
 
 
 def null_func(*args):
@@ -220,7 +221,10 @@ def exec_model(X, y, X_test, out_path, do_score=True):
 
     if do_score:
         clf = ExtraTreesClassifier()
-        score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True, scoring='f1')
+        score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True,
+            # scoring='f1'
+            scoring='accuracy'
+            )
         print('score=%f' % score)
 
     clf = ExtraTreesClassifier()
@@ -259,8 +263,41 @@ def exec_model(X, y, X_test, out_path, do_score=True):
     # for i in range(100):
     #     print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
 
-    pickle.dump('%s.pkl' % out_path, clf)
-    print(clf.feature_importances_')
+    with open('%s.pkl' % out_path, 'wb') as f:
+        pickle.dump(clf, f)
+
+    importances = {col: clf.feature_importances_[i] for i, col in enumerate(X.columns)}
+    total = 0.0
+    for i, col in enumerate(sorted(X.columns, key=lambda c: -importances[c])):
+        total += importances[col]
+        print('%4d: %e %e "%s"' % (i, importances[col], 1 - total, col))
+        if i >= 10 and 1 - total < 1e-6:
+            break
+    # print(clf.feature_importances_)
+
+    return y_self, y_test
+
+
+def show_failures(df, y, y_self, out_path):
+    diff = y_self['hat'] - y
+    failures = diff != 0
+    print('^' * 80)
+    print(type(failures))
+    print(failures.describe())
+    print(failures[:5])
+    failures_df = Series([False] * len(df), index=df.index)
+    for idx, val in failures.iteritems():
+        failures_df[idx] = val
+    df = df[failures_df]
+    y_self_df = Series([0] * len(df), index=df.index)
+    for idx in y_self_df.index:
+        y_self_df[idx] = y_self['hat'][idx]
+    df['predicted'] = y_self_df
+    columns = list(df.columns[-2:]) + list(df.columns[:-2])
+    df2 = DataFrame()
+    for col in columns:
+        df2[col] = df[col]
+    df2.to_csv('%s.failures.csv' % out_path, index_label='job_id')
 
 
 def build_model001(df):
@@ -365,7 +402,6 @@ def add_keywords(df, column, keywords):
 def build_model004(df):
     from keywords import get_keywords
 
-    x_cols = ['salary_min', 'salary_max', 'title', 'abstract']
     x_cols = ['title', 'abstract']
 
     df_train, df_test = split_train_test(df)
@@ -385,6 +421,41 @@ def build_model004(df):
     # for col in X_test.columns:
     #     print(col, X_test[col].dtype)
     # # assert False
+
+    return X, y, X_test
+
+
+def build_model005(df):
+    from keywords import get_keywords
+
+    x_cols = ['salary_min', 'salary_max', 'title', 'abstract']
+
+    # print('!' * 80)
+    # no_min = df['salary_min'].isnull()
+    # no_min_max = df['salary_max'][no_min]
+    # print('no_min_max')
+    # print(no_min_max)
+    # no_max = df['salary_max'].isnull()
+    # no_max_min = df['salary_min'][no_max]
+    # print('no_max_min')
+    # print(no_max_min)
+
+    has_minmax = df['salary_min'].notnull() & df['salary_max'].notnull()
+    df = df[has_minmax]
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    # X.dropna(how='all', inplace=True)
+
+    keywords = get_keywords(50)
+
+    X = add_keywords(X, 'title', keywords['title'])
+    X = add_keywords(X, 'abstract', keywords['abstract'])
+    X_test = add_keywords(X_test, 'title', keywords['title'])
+    X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
 
     return X, y, X_test
 
@@ -452,7 +523,6 @@ def show_words_column(df, column, n_top):
         ratios[w] = (n1 + 10) / (n0 + 10)
 
     ratio_order = sorted(ratios.keys(), key=lambda k: ratios[k])
-
 
     print('-' * 80)
     for w in ratio_order[:n_top]:
@@ -563,7 +633,7 @@ def combine_models():
 
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-# path = 'all/jobs_all.csv'
+path = 'all/jobs_all.csv'
 
 if False:
     df = get_data(path)
@@ -588,9 +658,17 @@ if False:
     show_words(df, 200)
 
 if True:
+    # score=0.928339 small
+    # score=0.928339
+    # score=0.957276 all
     df = get_data(path)
     X, y, X_test = build_model004(df)
-    # print('X', type(X))
-    # print('y', type(y))
-    # print('X_test', type(X_test))
-    exec_model(X, y, X_test, 'model004')
+    y_self, y_test = exec_model(X, y, X_test, 'model004')
+    show_failures(df, y, y_self, 'model004')
+
+if False:
+    # score=0.927018 small
+    # score=0.957513 all
+    df = get_data(path)
+    X, y, X_test = build_model005(df)
+    exec_model(X, y, X_test, 'model005')
