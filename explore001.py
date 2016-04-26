@@ -66,7 +66,8 @@ def get_score(clf, X, y, cv=CV, n_runs=N_SCORE_RUNS, scoring='accuracy', random_
 
 
 def getDummy(df_all, df, col):
-    """For column `col` in DataFrame `df`
+    """Add dummy booleans to DataFrame `df` for each category in `col` of DataFrame `df_all`
+        df_all is a superset of df
     """
     category_values = sorted(df_all[col].unique())
     data = np.zeros((len(df), len(category_values)), dtype=int)
@@ -177,9 +178,9 @@ def split_train_test(df):
     labelled_rows = df['hat'].values != -1
     df_train = df.iloc[labelled_rows, :]
     df_test = df.iloc[~labelled_rows, :]
-    print('df      : %s ', list(df.shape))
+    print('df      : %s ' % list(df.shape))
     print('df_train: %s %.2f' % (list(df_train.shape), len(df_train) / len(df)))
-    print('df_test: %s %.2f' % (list(df_test.shape), len(df_test) / len(df)))
+    print('df_test : %s %.2f' % (list(df_test.shape), len(df_test) / len(df)))
 
     # train_idx = set(df_train['subclasses'])
     # test_idx = set(df_test['subclasses'])
@@ -202,9 +203,16 @@ def getXy(df, x_cols):
     return X, y
 
 
+def S(df):
+    # assert isinstance(df, DataFrame), type(df)
+    return list(df.shape)
+
+
 def exec_model(X, y, X_test, out_path, do_score=True):
-    print(X.describe())
-    print(y.describe())
+    print('exec_model: X=%s,y=%s,X_test=%s,out_path="%s"' %
+          (S(X), S(y), S(X_test), out_path))
+    # print(X.describe())
+    # print(y.describe())
     y = DataFrame(y, columns=['hat'], index=X.index)
     X.to_csv('%s.X_train.csv' % out_path, index_label='job_id')
     y.to_csv('%s.y_train.csv' % out_path, index_label='job_id')
@@ -317,6 +325,67 @@ def build_model003(df):
 
     return X, y, X_test
 
+
+def add_keywords(df, column, keywords):
+
+    data = np.zeros((len(df), len(keywords)), dtype=np.int8)
+
+    nan_count = 0
+
+    for i, text in enumerate(df[column]):
+        # assert isinstance(text, str), (column, type(text), text)
+        if not isinstance(text, str):
+            nan_count += 1
+            continue
+        words = set(RE_SPACE.split(text.lower()))
+        words = {w.replace("'", '').replace("!", '') .replace("?", '')
+                 for w in words}
+
+        for j, kw in enumerate(keywords):
+            if kw in words:
+                data[i, j] = 1
+
+    print('column=%s,df=%s,nan_count=%d=%.2f' % (column, list(df.shape), nan_count,
+          nan_count / len(df)))
+    # assert nan_count == 0
+
+    df_out = df[[col for col in df.columns if col != column]]
+
+    for j, kw in enumerate(keywords):
+        df_out.loc[:, '%s_%s' % (column, kw)] = data[:, j]
+
+    assert isinstance(df, DataFrame)
+
+    return df_out
+
+
+def build_model004(df):
+    from keywords import get_keywords
+
+    x_cols = ['salary_min', 'salary_max', 'title', 'abstract']
+    x_cols = ['title', 'abstract']
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    keywords = get_keywords(50)
+
+    X = add_keywords(X, 'title', keywords['title'])
+    X = add_keywords(X, 'abstract', keywords['abstract'])
+    X_test = add_keywords(X_test, 'title', keywords['title'])
+    X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
+
+    for col in X.columns:
+        print(col, X[col].dtype)
+    for col in X_test.columns:
+        print(col, X_test[col].dtype)
+    # assert False
+
+    return X, y, X_test
+
+
 STOP_WORDS = {
     '-',
     'and',
@@ -330,10 +399,13 @@ STOP_WORDS = {
     'as',
     'i',
     'on',
-    'the'
+    'the',
+    'this',
+    'their',
+    'an',
 }
 
-RE_SPACE = re.compile(r'[\s\.,;:\(\)\[\]/\+&\-]+')
+RE_SPACE = re.compile(r'[\s\.,;:\(\)\[\]/\+&\-\|]+')
 
 
 def show_words_column(df, column, n_top):
@@ -345,9 +417,11 @@ def show_words_column(df, column, n_top):
         df2 = df[df['hat'] == hat]
         for title in df2[column]:
             title = title.lower()
-            words = RE_SPACE.split(title)
-            for w in set(words):
-                if w and w not in STOP_WORDS:
+            words = set(RE_SPACE.split(title))
+            words = {w.replace("'", '').replace("!", '') .replace("?", '')
+                     for w in words}
+            for w in words:
+                if w and (w not in STOP_WORDS) and ('$' not in w):
                     counts[w] += 1
         hat_counts[hat] = counts
 
@@ -376,12 +450,25 @@ def show_words_column(df, column, n_top):
 
     ratio_order = sorted(ratios.keys(), key=lambda k: ratios[k])
 
+
     print('-' * 80)
     for w in ratio_order[:n_top]:
         print('%8.3f %5d %5d "%s"' % (1.0 / ratios[w], contrasts[w][0], contrasts[w][1], w))
     print('-' * 80)
     for w in ratio_order[-n_top:]:
         print('%8.3f %5d %5d "%s"' % (ratios[w], contrasts[w][0], contrasts[w][1], w))
+
+    # n_bottom = min(n_top, len(ratio_order) - n_top)
+    # signicant_keys = ratio_order[:n_top] + ratio_order[-n_bottom:]
+
+    pretty_dict = {}
+    for w in ratio_order[:n_top] + ratio_order[-n_top:]:
+        pretty_dict[w] = np.log10(ratios[w]), contrasts[w][0], contrasts[w][1]
+    pretty_list = sorted(pretty_dict.items(), key=lambda x: (x[1], x[0]))
+    print('*' * 80)
+    pprint(pretty_list)
+
+    return ratio_order, ratios, contrasts
 
 
 def show_words(df, n_top):
@@ -471,17 +558,16 @@ def combine_models():
     print(y_test.iloc[:10, :])
 
 
-
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-# path = 'all/jobs_all.csv'
+path = 'all/jobs_all.csv'
 
 if False:
     df = get_data(path)
     X, y, X_test = build_model001(df)
     exec_model(X, y, X_test, 'model001', do_score=True)
 
-if True:
+if False:
     df = get_data(path)
     X, y, X_test = build_model002(df)
     exec_model(X, y, X_test, 'model002')
@@ -494,7 +580,14 @@ if False:
 if False:
     combine_models()
 
+if False:
+    df = get_data(path)
+    show_words(df, 200)
+
 if True:
     df = get_data(path)
-    show_words(df, 50)
-
+    X, y, X_test = build_model004(df)
+    print('X', type(X))
+    print('y', type(y))
+    print('X_test', type(X_test))
+    exec_model(X, y, X_test, 'model004')
