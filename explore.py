@@ -132,8 +132,18 @@ if False:
     assert False
 
 
-def get_data(path):
+def get_data_ours(path):
+    """Read a CSV file we created
+    """
+    df = pd.read_csv(path)
+    print(df[['job_id', 'hat']].describe())
+    df.set_index('job_id', inplace=True)
+    df.sort_index(inplace=True)
+    return df
 
+def get_data(path):
+    """Read a competition tab delimeted data fie
+    """
     df = pd.read_csv(path, sep='\t',
          # encoding='cp1250'
          encoding='latin-1',
@@ -209,7 +219,7 @@ def S(df):
     return list(df.shape)
 
 
-def exec_model(X, y, X_test, out_path, do_score=True):
+def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
     print('exec_model: X=%s,y=%s,X_test=%s,out_path="%s"' %
           (S(X), S(y), S(X_test), out_path))
     # print(X.describe())
@@ -220,14 +230,14 @@ def exec_model(X, y, X_test, out_path, do_score=True):
     print(y.columns)
 
     if do_score:
-        clf = ExtraTreesClassifier()
+        clf = ExtraTreesClassifier(random_state=RANDOM_STATE, n_estimators=n_estimators)
         score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True,
             # scoring='f1'
             scoring='accuracy'
             )
         print('score=%f' % score)
 
-    clf = ExtraTreesClassifier()
+    clf = ExtraTreesClassifier(random_state=RANDOM_STATE, n_estimators=n_estimators)
     # clf = RandomForestClassifier()
     clf.fit(X, y.values.ravel())
     y_self = clf.predict(X)
@@ -410,17 +420,16 @@ def build_model004(df):
     X_test, _ = getXy(df_test, x_cols)
 
     keywords = get_keywords(50)
+    print('keywords=%s' % keywords)
+
+    print('X before=%s:%s' % (list(X.shape), X.columns))
 
     X = add_keywords(X, 'title', keywords['title'])
     X = add_keywords(X, 'abstract', keywords['abstract'])
     X_test = add_keywords(X_test, 'title', keywords['title'])
     X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
 
-    # for col in X.columns:
-    #     print(col, X[col].dtype)
-    # for col in X_test.columns:
-    #     print(col, X_test[col].dtype)
-    # # assert False
+    print('X after =%s:%s' % (list(X.shape), X.columns))
 
     return X, y, X_test
 
@@ -458,6 +467,57 @@ def build_model005(df):
     X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
 
     return X, y, X_test
+
+
+def build_model006(df):
+    from keywords import get_keywords_pos_neg
+
+    x_cols = ['title', 'abstract']
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    keywords = get_keywords_pos_neg(50)
+    print('keywords=%s' % keywords)
+
+    print('X before=%s:%s' % (list(X.shape), X.columns))
+
+    X = add_keywords(X, 'title', keywords['title'])
+    X = add_keywords(X, 'abstract', keywords['abstract'])
+    X_test = add_keywords(X_test, 'title', keywords['title'])
+    X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
+
+    print('X after =%s:%s' % (list(X.shape), X.columns))
+
+    return X, y, X_test
+
+
+def build_model007(df):
+    from keywords import get_keywords_pos_neg2
+
+    x_cols = ['title', 'abstract']
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    keywords = get_keywords_pos_neg2(50)
+    print('keywords=%s' % keywords)
+
+    print('X before=%s:%s' % (list(X.shape), X.columns))
+
+    X = add_keywords(X, 'title', keywords['title'])
+    X = add_keywords(X, 'abstract', keywords['abstract'])
+    X_test = add_keywords(X_test, 'title', keywords['title'])
+    X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
+
+    print('X after =%s:%s' % (list(X.shape), X.columns))
+
+    return X, y, X_test
+
 
 
 STOP_WORDS = {
@@ -545,22 +605,14 @@ def show_words_column(df, column, n_top):
 
 
 def show_words(df, n_top):
-    # for col in df.columns:
-    #     print(col, df[col].dtype)
-    # for s in df['abstract'].iloc[:5]:
-    #     print(type(s), s)
-
     filled = df['abstract'].fillna('')
     df['abstract'] = filled
-    # for s in df['abstract']:
-    #     assert isinstance(s, str), (type(s), s)
+
     i_abstract = list(df.columns).index('abstract')
     for row in df.itertuples():
         s = row[i_abstract + 1]
         assert isinstance(s, str), (type(s), s, row)
 
-
-    # assert False
     show_words_column(df, 'title', n_top)
     show_words_column(df, 'abstract', n_top)
 
@@ -654,10 +706,10 @@ if False:
     combine_models()
 
 if False:
-    df = get_data(path)
+    df = get_data_ours('model006.failures.csv')
     show_words(df, 200)
 
-if True:
+if False:
     # score=0.928339 small
     # score=0.928339
     # score=0.957276 all
@@ -672,3 +724,19 @@ if False:
     df = get_data(path)
     X, y, X_test = build_model005(df)
     exec_model(X, y, X_test, 'model005')
+
+if False:
+    # score=0.967427 all
+    # score=0.967441 all n_estimators=20
+    df = get_data(path)
+    X, y, X_test = build_model006(df)
+    y_self, y_test = exec_model(X, y, X_test, 'model006')
+    show_failures(df, y, y_self, 'model006')
+
+if True:
+    # score=0.971642
+    df = get_data(path)
+    X, y, X_test = build_model007(df)
+    y_self, y_test = exec_model(X, y, X_test, 'model007')
+    show_failures(df, y, y_self, 'model007')
+
