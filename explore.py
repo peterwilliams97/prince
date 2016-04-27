@@ -222,11 +222,12 @@ def S(df):
 def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
     print('exec_model: X=%s,y=%s,X_test=%s,out_path="%s"' %
           (S(X), S(y), S(X_test), out_path))
+    name = '%s-%dx%d' % (out_path, X.shape[0], X.shape[1])
     # print(X.describe())
     # print(y.describe())
     y = DataFrame(y, columns=['hat'], index=X.index)
-    X.to_csv('%s.X_train.csv' % out_path, index_label='job_id')
-    y.to_csv('%s.y_train.csv' % out_path, index_label='job_id')
+    X.to_csv('%s.X_train.csv' % name, index_label='job_id')
+    y.to_csv('%s.y_train.csv' % name, index_label='job_id')
     print(y.columns)
 
     if do_score:
@@ -269,11 +270,11 @@ def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
     n = len(y)
     m = sum(y_self['hat'] == y['hat'])
     print('accuracy: n=%d,m=%d=%.2f' % (n, m, m / n))
-    y_test.to_csv('%s.y_test.csv' % out_path, index_label='job_id')
+    y_test.to_csv('%s.y_test.csv' % name, index_label='job_id')
     # for i in range(100):
     #     print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
 
-    with open('%s.pkl' % out_path, 'wb') as f:
+    with open('%s.pkl' % name, 'wb') as f:
         pickle.dump(clf, f)
 
     importances = {col: clf.feature_importances_[i] for i, col in enumerate(X.columns)}
@@ -289,6 +290,7 @@ def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
 
 
 def show_failures(df, y, y_self, out_path):
+    name = '%s-%d' % (out_path, len(y))
     diff = y_self['hat'] - y
     failures = diff != 0
     print('^' * 80)
@@ -307,7 +309,7 @@ def show_failures(df, y, y_self, out_path):
     df2 = DataFrame()
     for col in columns:
         df2[col] = df[col]
-    df2.to_csv('%s.failures.csv' % out_path, index_label='job_id')
+    df2.to_csv('%s.failures.csv' % name, index_label='job_id')
 
 
 def build_model001(df):
@@ -735,8 +737,9 @@ if False:
 
 if True:
     # score=0.971642
+    # score=0.971692  n_esitmators=20
     df = get_data(path)
     X, y, X_test = build_model007(df)
-    y_self, y_test = exec_model(X, y, X_test, 'model007')
+    y_self, y_test = exec_model(X, y, X_test, 'model007', n_estimators=10)
     show_failures(df, y, y_self, 'model007')
 
