@@ -141,6 +141,7 @@ def get_data_ours(path):
     df.sort_index(inplace=True)
     return df
 
+
 def get_data(path):
     """Read a competition tab delimeted data fie
     """
@@ -219,7 +220,7 @@ def S(df):
     return list(df.shape)
 
 
-def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
+def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10, cv=CV, n_runs=N_SCORE_RUNS):
     print('exec_model: X=%s,y=%s,X_test=%s,out_path="%s"' %
           (S(X), S(y), S(X_test), out_path))
     name = '%s-%dx%d' % (out_path, X.shape[0], X.shape[1])
@@ -228,11 +229,11 @@ def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
     y = DataFrame(y, columns=['hat'], index=X.index)
     X.to_csv('%s.X_train.csv' % name, index_label='job_id')
     y.to_csv('%s.y_train.csv' % name, index_label='job_id')
-    print(y.columns)
+    # print(y.columns)
 
     if do_score:
         clf = ExtraTreesClassifier(random_state=RANDOM_STATE, n_estimators=n_estimators)
-        score = get_score(clf, X, y.values.ravel(), cv=2, verbose=True,
+        score = get_score(clf, X, y.values.ravel(), cv=cv, n_runs=n_runs, verbose=True,
             # scoring='f1'
             scoring='accuracy'
             )
@@ -256,8 +257,7 @@ def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
 
     y_test = clf.predict(X_test)
     y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
-    # print('X_test.index', X_test.index)
-    # print('y_test.index', y_test.index)
+
     n = len(y)
     m = sum(y['hat'])
     print('y     : n=%d,m=%d=%.2f' % (n, m, m / n))
@@ -271,25 +271,28 @@ def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10):
     m = sum(y_self['hat'] == y['hat'])
     print('accuracy: n=%d,m=%d=%.2f' % (n, m, m / n))
     y_test.to_csv('%s.y_test.csv' % name, index_label='job_id')
-    # for i in range(100):
-    #     print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
 
     with open('%s.pkl' % name, 'wb') as f:
         pickle.dump(clf, f)
 
     importances = {col: clf.feature_importances_[i] for i, col in enumerate(X.columns)}
     total = 0.0
-    for i, col in enumerate(sorted(X.columns, key=lambda c: -importances[c])):
-        total += importances[col]
-        print('%4d: %e %e "%s"' % (i, importances[col], 1 - total, col))
-        if i >= 10 and 1 - total < 1e-6:
-            break
-    # print(clf.feature_importances_)
+    import csv
+    with open('%s.importance.csv' % name, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Order', 'Fraction', 'Unexplained', 'Column'])
+        for i, col in enumerate(sorted(X.columns, key=lambda c: -importances[c])):
+            total += importances[col]
+            writer.writerow([i, importances[col], 1 - total, col])
+            if i >= 10 and 1 - total < 1e-6:
+                break
 
     return y_self, y_test
 
 
 def show_failures(df, y, y_self, out_path):
+    print('show_failures: df=%s,y=%s,y_self=%s,out_path="%s"' %
+          (S(df), S(y), S(y_self), out_path))
     name = '%s-%d' % (out_path, len(y))
     diff = y_self['hat'] - y
     failures = diff != 0
@@ -310,6 +313,20 @@ def show_failures(df, y, y_self, out_path):
     for col in columns:
         df2[col] = df[col]
     df2.to_csv('%s.failures.csv' % name, index_label='job_id')
+
+
+def show_predicted(df, y_test, out_path):
+    print('show_predicted: df=%s,y_test=%s,out_path="%s"' %
+          (S(df), S(y_test), out_path))
+    name = '%s-%d' % (out_path, len(y_test))
+    print('~' * 80)
+    df = df.loc[y_test.index, :]
+    df['hat'] = y_test
+    columns = ['hat'] + [col for col in df.columns if col != 'hat']
+    df2 = DataFrame()
+    for col in columns:
+        df2[col] = df[col]
+    df2.to_csv('%s.predicted.csv' % name, index_label='job_id')
 
 
 def build_model001(df):
@@ -521,6 +538,14 @@ def build_model007(df):
     return X, y, X_test
 
 
+def build_model008_zeros(df):
+    _, df_test = split_train_test(df)
+    X_test, _ = getXy(df_test, [])
+    y_test = [0] * len(X_test)
+    y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
+
+    y_test.to_csv('%s.y_test.csv' % 'model008_zeros', index_label='job_id')
+
 
 STOP_WORDS = {
     '-',
@@ -687,7 +712,7 @@ def combine_models():
 
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-path = 'all/jobs_all.csv'
+# path = 'all/jobs_all.csv'
 
 if False:
     df = get_data(path)
@@ -711,7 +736,7 @@ if False:
     df = get_data_ours('model006.failures.csv')
     show_words(df, 200)
 
-if False:
+if True:
     # score=0.928339 small
     # score=0.928339
     # score=0.957276 all
@@ -740,6 +765,11 @@ if True:
     # score=0.971692  n_esitmators=20
     df = get_data(path)
     X, y, X_test = build_model007(df)
-    y_self, y_test = exec_model(X, y, X_test, 'model007', n_estimators=10)
+    y_self, y_test = exec_model(X, y, X_test, 'model007', n_estimators=10, n_runs=4, cv=5)
     show_failures(df, y, y_self, 'model007')
+    show_predicted(df, y_test, 'model007')
+
+if False:
+    df = get_data(path)
+    build_model008_zeros(df)
 
