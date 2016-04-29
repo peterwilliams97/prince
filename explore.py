@@ -3,6 +3,7 @@
 
 """
 from __future__ import division, print_function
+import sys
 import os
 import re
 import numpy as np
@@ -14,6 +15,7 @@ from sklearn import cross_validation, utils
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from collections import defaultdict
 import pickle
+from gini import gini_normalized
 
 
 def null_func(*args):
@@ -45,8 +47,8 @@ def get_score(clf, X, y, cv=CV, n_runs=N_SCORE_RUNS, scoring='accuracy', random_
             scores = cross_validation.cross_val_score(clf, X, y, cv=cv, scoring=scoring,
                                                       n_jobs=n_jobs)
         except:
-            print(clf)
-            print((X.shape, y.shape))
+            print(clf, file=sys.stderr)
+            print((X.shape, y.shape), file=sys.stderr)
             raise
         score_list.append((scores.mean(), scores.std() * 2))
         all_scores[i * cv:(i + 1) * cv] = scores
@@ -290,6 +292,80 @@ def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10, cv=CV, n_
     return y_self, y_test
 
 
+def gini_scorer(estimator, X, y):
+    assert len(y.shape) == 1, (type(y), y.shape, y[:3, :])
+    y_pred = estimator.predict_proba(X)[:, 1]
+    assert len(y_pred.shape) == 1, (type(y_pred), y_pred.shape, y[:5], y_pred[:5, :])
+    assert y_pred.shape == y.shape, (y_pred.shape, y.shape)
+    return gini_normalized(y, y_pred)
+
+
+def exec_model_prob(X, y, X_test, out_path, do_score=True, n_estimators=10, cv=CV,
+                    n_runs=N_SCORE_RUNS, n_jobs=-1):
+    print('exec_model_prob: X=%s,y=%s,X_test=%s,out_path="%s"' %
+          (S(X), S(y), S(X_test), out_path))
+    name = '%s-%dx%d' % (out_path, X.shape[0], X.shape[1])
+    y = DataFrame(y, columns=['hat'], index=X.index)
+    X.to_csv('%s.X_train.csv' % name, index_label='job_id')
+    y.to_csv('%s.y_train.csv' % name, index_label='job_id')
+    # print(y.columns)
+
+    if do_score:
+        clf = ExtraTreesClassifier(random_state=RANDOM_STATE, n_estimators=n_estimators)
+        score = get_score(clf, X, y.values.ravel(), cv=cv, n_runs=n_runs, verbose=True,
+                          scoring=gini_scorer, n_jobs=n_jobs)
+        print('score=%f' % score)
+
+    clf = ExtraTreesClassifier(random_state=RANDOM_STATE, n_estimators=n_estimators, n_jobs=n_jobs)
+    # clf = RandomForestClassifier()
+    clf.fit(X, y.values.ravel())
+    y_self = clf.predict_proba(X)[:, 1]
+    y_self = DataFrame(y_self, columns=['hat'], index=X.index)
+    n = len(y)
+    m = sum(y['hat'])
+    s = sum(y_self['hat'])
+    assert n == len(y_self)
+
+    print('****', n, m, s, m / n, s / n)
+    print(clf)
+    for i in range(10):
+        print('%4d: %d %d' % (i, y['hat'].iloc[i], y_self['hat'].iloc[i]))
+
+    y_test = clf.predict_proba(X_test)[:, 1]
+    y_test = DataFrame(y_test, columns=['hat'], index=X_test.index)
+
+    n = len(y)
+    m = sum(y['hat'])
+    print('y     : n=%d,m=%d=%.2f' % (n, m, m / n))
+    n = len(y_self)
+    m = sum(y_self['hat'])
+    print('y_self: n=%d,m=%d=%.2f' % (n, m, m / n))
+    n = len(y_test)
+    m = sum(y_test['hat'])
+    print('y_test: n=%d,m=%d=%.2f' % (n, m, m / n))
+    n = len(y)
+    m = sum(y_self['hat'] == y['hat'])
+    print('accuracy: n=%d,m=%d=%.2f' % (n, m, m / n))
+    y_test.to_csv('%s.y_test.csv' % name, index_label='job_id')
+
+    with open('%s.pkl' % name, 'wb') as f:
+        pickle.dump(clf, f)
+
+    importances = {col: clf.feature_importances_[i] for i, col in enumerate(X.columns)}
+    total = 0.0
+    import csv
+    with open('%s.importance.csv' % name, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Order', 'Fraction', 'Unexplained', 'Column'])
+        for i, col in enumerate(sorted(X.columns, key=lambda c: -importances[c])):
+            total += importances[col]
+            writer.writerow([i, importances[col], 1 - total, col])
+            if i >= 10 and 1 - total < 1e-6:
+                break
+
+    return y_self, y_test
+
+
 def show_failures(df, y, y_self, out_path):
     print('show_failures: df=%s,y=%s,y_self=%s,out_path="%s"' %
           (S(df), S(y), S(y_self), out_path))
@@ -315,6 +391,39 @@ def show_failures(df, y, y_self, out_path):
     df2.to_csv('%s.failures.csv' % name, index_label='job_id')
 
 
+def show_failures_prob(df, y, y_self, out_path):
+    print('show_failures_prob: df=%s,y=%s,y_self=%s,out_path="%s"' %
+          (S(df), S(y), S(y_self), out_path))
+    name = '%s-%d' % (out_path, len(y))
+
+    y_self_bool = DataFrame(np.floor(y_self['hat'].values * 2.0).astype(int),
+                            index=y_self.index, columns=['hat'])
+
+    diff = y_self_bool - y
+    failures = diff != 0
+    print('^' * 80)
+    print(type(failures))
+    print(failures.describe())
+    print(failures[:5])
+    failures_df = Series([False] * len(df), index=df.index)
+    for idx, val in failures.iteritems():
+        failures_df[idx] = val
+    df = df[failures_df]
+    y_self_df = Series([0.0] * len(df), index=df.index, dtype=float)
+    y_self_df_bool = Series([0] * len(df), index=df.index, dtype=int)
+    for idx in y_self_df.index:
+        y_self_df[idx] = y_self['hat'][idx]
+        y_self_df_bool[idx] = y_self_bool['hat'][idx]
+    df['probability'] = y_self_df
+    df['predicted'] = y_self_df_bool
+    columns = list(df.columns[-3:]) + list(df.columns[:-3])
+    df2 = DataFrame()
+    for col in columns:
+        df2[col] = df[col]
+    df2.sort_values('hat', ascending=False, inplace=True)
+    df2.to_csv('%s.failures.csv' % name, index_label='job_id')
+
+
 def show_predicted(df, y_test, out_path):
     print('show_predicted: df=%s,y_test=%s,out_path="%s"' %
           (S(df), S(y_test), out_path))
@@ -326,6 +435,21 @@ def show_predicted(df, y_test, out_path):
     df2 = DataFrame()
     for col in columns:
         df2[col] = df[col]
+    df2.to_csv('%s.predicted.csv' % name, index_label='job_id')
+
+
+def show_predicted_prob(df, y_test, out_path):
+    print('show_predicted_prob: df=%s,y_test=%s,out_path="%s"' %
+          (S(df), S(y_test), out_path))
+    name = '%s-%d' % (out_path, len(y_test))
+    print('~' * 80)
+    df = df.loc[y_test.index, :]
+    df['hat'] = y_test
+    columns = ['hat'] + [col for col in df.columns if col != 'hat']
+    df2 = DataFrame()
+    for col in columns:
+        df2[col] = df[col]
+    df2.sort_values('hat', ascending=False, inplace=True)
     df2.to_csv('%s.predicted.csv' % name, index_label='job_id')
 
 
@@ -712,7 +836,7 @@ def combine_models():
 
 path = 'sneak/jobs_sneak.csv'
 # path = 'small/jobs_small.csv'
-# path = 'all/jobs_all.csv'
+path = 'all/jobs_all.csv'
 
 if False:
     df = get_data(path)
@@ -760,7 +884,7 @@ if False:
     y_self, y_test = exec_model(X, y, X_test, 'model006')
     show_failures(df, y, y_self, 'model006')
 
-if True:
+if False:
     # score=0.971642
     # score=0.971692  n_esitmators=20
     df = get_data(path)
@@ -769,7 +893,27 @@ if True:
     show_failures(df, y, y_self, 'model007')
     show_predicted(df, y_test, 'model007')
 
+
+if True:
+    # score=0.908389 cv=2
+    # 0.91937 kaggle
+    df = get_data(path)
+    X, y, X_test = build_model007(df)
+    y_self, y_test = exec_model_prob(X, y, X_test, 'model007p', n_estimators=10, n_runs=1, cv=2,
+                                     n_jobs=-1)
+    show_failures_prob(df, y, y_self, 'model007p')
+    show_predicted_prob(df, y_test, 'model007p')
+
+
+if False:
+    # score=0.908989
+    df = get_data(path)
+    X, y, X_test = build_model007(df)
+    y_self, y_test = exec_model_prob(X, y, X_test, 'model007p40', n_estimators=40, n_runs=1, cv=2,
+                                     n_jobs=-1)
+    show_failures_prob(df, y, y_self, 'model007p40')
+    show_predicted_prob(df, y_test, 'model007p40')
+
 if False:
     df = get_data(path)
     build_model008_zeros(df)
-
