@@ -222,6 +222,11 @@ def S(df):
     return list(df.shape)
 
 
+def C(df):
+    # assert isinstance(df, DataFrame), type(df)
+    return [(col, df[col].dtype) for col in df.columns]
+
+
 def exec_model(X, y, X_test, out_path, do_score=True, n_estimators=10, cv=CV, n_runs=N_SCORE_RUNS):
     print('exec_model: X=%s,y=%s,X_test=%s,out_path="%s"' %
           (S(X), S(y), S(X_test), out_path))
@@ -399,7 +404,10 @@ def show_failures_prob(df, y, y_self, out_path):
     y_self_bool = DataFrame(np.floor(y_self['hat'].values * 2.0).astype(int),
                             index=y_self.index, columns=['hat'])
 
-    diff = y_self_bool - y
+    print('A) y_self_bool=%s,' % C(y_self_bool))
+    print('B) y=%s' % y.dtype)
+
+    diff = y_self_bool['hat'] - y
     failures = diff != 0
     print('^' * 80)
     print(type(failures))
@@ -671,6 +679,34 @@ def build_model008_zeros(df):
     y_test.to_csv('%s.y_test.csv' % 'model008_zeros', index_label='job_id')
 
 
+def build_model009(df):
+    from keywords import get_keywords_pos_neg2, get_keywords_column, kw_raw_job_type
+
+    x_cols = ['title', 'abstract', 'raw_job_type']
+
+    df_train, df_test = split_train_test(df)
+
+    X, y = getXy(df_train, x_cols)
+    X_test, _ = getXy(df_test, x_cols)
+
+    keywords = get_keywords_pos_neg2(50)
+    print('keywords=%s' % keywords)
+    words_raw_job_type = get_keywords_column(50, kw_raw_job_type)
+    print('words_raw_job_type=%s' % words_raw_job_type)
+
+    print('X before=%s:%s' % (list(X.shape), X.columns))
+
+    X = add_keywords(X, 'title', keywords['title'])
+    X = add_keywords(X, 'abstract', keywords['abstract'])
+    X = add_keywords(X, 'raw_job_type', words_raw_job_type)
+    X_test = add_keywords(X_test, 'title', keywords['title'])
+    X_test = add_keywords(X_test, 'abstract', keywords['abstract'])
+    X_test = add_keywords(X_test, 'raw_job_type', words_raw_job_type)
+
+    print('X after =%s:%s' % (list(X.shape), X.columns))
+
+    return X, y, X_test
+
 STOP_WORDS = {
     '-',
     'and',
@@ -678,6 +714,8 @@ STOP_WORDS = {
     '/',
     '|',
     '&',
+    '<',
+    '>',
     'of',
     'in',
     'a',
@@ -688,6 +726,9 @@ STOP_WORDS = {
     'this',
     'their',
     'an',
+    'to',
+    'or',
+    'is'
 }
 
 RE_SPACE = re.compile(r'[\s\.,;:\(\)\[\]/\+&\-\|]+')
@@ -721,6 +762,17 @@ def show_words_column(df, column, n_top):
         top0 = sorted(hat_counts[0], key=lambda k: -hat_counts[0][k])
         top1 = sorted(hat_counts[1], key=lambda k: -hat_counts[0][k])
 
+    N = sum(hat_counts[0].values())
+    P = sum(hat_counts[1].values())
+    R = P / N
+    min_n = 200
+    min_p = min_n * R
+
+    def log_ratio(n, p):
+        return np.log10((p + 10) / (n / R + 10))
+
+    log_ratio_0 = log_ratio(N, P)
+
     key_words = set()
     for hat in [0, 1]:
         key_words |= set(hat_counts[hat].keys())
@@ -729,30 +781,25 @@ def show_words_column(df, column, n_top):
         for w, n in hat_counts[hat].items():
             contrasts[w][i] += n
 
-    ratios = {}
-    for w, (n0, n1) in contrasts.items():
-        ratios[w] = (n1 + 10) / (n0 + 10)
+    contrasts = {w: [n, p] for w, (n, p) in contrasts.items()
+                 if n >= min_n or p >= min_p}
+    print('before:', len(contrasts))
+    contrasts = {w: [n, p] for w, (n, p) in contrasts.items()
+                 if np.abs(log_ratio(n, p) - log_ratio_0) > 0.3}
+    print('after:', len(contrasts))
 
-    ratio_order = sorted(ratios.keys(), key=lambda k: ratios[k])
+    contrasts = {w: (n, p, log_ratio(n, p),
+                     log_ratio(n, p) - log_ratio_0) for w, (n, p) in contrasts.items()}
 
-    print('-' * 80)
-    for w in ratio_order[:n_top]:
-        print('%8.3f %5d %5d "%s"' % (1.0 / ratios[w], contrasts[w][0], contrasts[w][1], w))
-    print('-' * 80)
-    for w in ratio_order[-n_top:]:
-        print('%8.3f %5d %5d "%s"' % (ratios[w], contrasts[w][0], contrasts[w][1], w))
+    def sort_key(w, npr):
+        n, p, r, r0 = npr
+        return r0
 
-    # n_bottom = min(n_top, len(ratio_order) - n_top)
-    # signicant_keys = ratio_order[:n_top] + ratio_order[-n_bottom:]
-
-    pretty_dict = {}
-    for w in ratio_order[:n_top] + ratio_order[-n_top:]:
-        pretty_dict[w] = np.log10(ratios[w]), contrasts[w][0], contrasts[w][1]
-    pretty_list = sorted(pretty_dict.items(), key=lambda x: (x[1], x[0]))
+    pretty_list = sorted(contrasts.items(), key=lambda kv: sort_key(*kv))
     print('*' * 80)
     pprint(pretty_list)
 
-    return ratio_order, ratios, contrasts
+    # return ratio_order, ratios, contrasts
 
 
 def show_words(df, n_top):
@@ -766,6 +813,25 @@ def show_words(df, n_top):
 
     show_words_column(df, 'title', n_top)
     show_words_column(df, 'abstract', n_top)
+
+
+def show_words_job(df, n_top):
+    """
+        raw_job_type
+        Casual
+        Internship/Work Experience
+        Full Time
+        Full-time
+    """
+    filled = df['raw_job_type'].fillna('')
+    df['raw_job_type'] = filled
+
+    i_abstract = list(df.columns).index('raw_job_type')
+    for row in df.itertuples():
+        s = row[i_abstract + 1]
+        assert isinstance(s, str), (type(s), s, row)
+
+    show_words_column(df, 'raw_job_type', n_top)
 
 
 RE_MODEL = re.compile(r'model(\d+)\.')
@@ -857,10 +923,10 @@ if False:
     combine_models()
 
 if False:
-    df = get_data_ours('model006.failures.csv')
-    show_words(df, 200)
+    df = get_data('all/jobs_all.csv')
+    show_words_job(df, 2000)
 
-if True:
+if False:
     # score=0.928339 small
     # score=0.928339
     # score=0.957276 all
@@ -893,8 +959,7 @@ if False:
     show_failures(df, y, y_self, 'model007')
     show_predicted(df, y_test, 'model007')
 
-
-if True:
+if False:
     # score=0.908389 cv=2
     # 0.91937 kaggle
     df = get_data(path)
@@ -903,7 +968,6 @@ if True:
                                      n_jobs=-1)
     show_failures_prob(df, y, y_self, 'model007p')
     show_predicted_prob(df, y_test, 'model007p')
-
 
 if False:
     # score=0.908989
@@ -917,3 +981,11 @@ if False:
 if False:
     df = get_data(path)
     build_model008_zeros(df)
+
+if True:
+    df = get_data(path)
+    X, y, X_test = build_model009(df)
+    y_self, y_test = exec_model_prob(X, y, X_test, 'model009p', n_estimators=10, n_runs=1, cv=2,
+                                     n_jobs=-1)
+    show_failures_prob(df, y, y_self, 'model009p')
+    show_predicted_prob(df, y_test, 'model009p')
